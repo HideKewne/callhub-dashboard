@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import './dashboard.css';
+import { useAuth } from './context/AuthContext';
+import { updateAvailability } from './lib/supabase';
+import { IncomingCallModal } from './components/IncomingCallModal';
+import { useIncomingCalls } from './hooks/useIncomingCalls';
 
 interface LineData {
   id: number;
@@ -32,9 +35,31 @@ const activityData: ActivityData[] = [
 ];
 
 export function Dashboard() {
+  const { closer, signOut } = useAuth();
   const [currentTime, setCurrentTime] = useState('');
-  const [isOnline, setIsOnline] = useState(true);
+  const [isOnline, setIsOnline] = useState(closer?.is_available ?? false);
   const [lines, setLines] = useState<LineData[]>(initialLines);
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  // Incoming call handling
+  const { incomingCall, acceptCall, declineCall, claimError } = useIncomingCalls();
+
+  // Show claim error as alert (temporary - could be improved with toast)
+  useEffect(() => {
+    if (claimError) {
+      alert(claimError);
+    }
+  }, [claimError]);
+
+  // Get user's initials for avatar
+  const getInitials = (name: string): string => {
+    return name
+      .split(' ')
+      .map((n) => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
 
   // Update current time
   useEffect(() => {
@@ -44,7 +69,7 @@ export function Dashboard() {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
-        hour12: true
+        hour12: true,
       };
       setCurrentTime(now.toLocaleTimeString('en-US', options));
     };
@@ -53,23 +78,47 @@ export function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
+  // Sync with closer's availability from database
+  useEffect(() => {
+    if (closer) {
+      setIsOnline(closer.is_available);
+    }
+  }, [closer]);
+
   // Master toggle handler
-  const handleMasterToggle = () => {
+  const handleMasterToggle = async () => {
+    if (isUpdating) return;
+
     const newState = !isOnline;
+    setIsUpdating(true);
+
+    // Optimistically update UI
     setIsOnline(newState);
-    setLines(lines.map(line => ({ ...line, isOnline: newState })));
+    setLines(lines.map((line) => ({ ...line, isOnline: newState })));
+
+    // Update backend
+    const result = await updateAvailability(newState);
+
+    if (!result.success) {
+      // Revert on failure
+      setIsOnline(!newState);
+      setLines(lines.map((line) => ({ ...line, isOnline: !newState })));
+      console.error('Failed to update availability:', result.error);
+    }
+
+    setIsUpdating(false);
   };
 
   // Individual line toggle handler
   const handleLineToggle = (lineId: number) => {
-    const newLines = lines.map(line =>
+    const newLines = lines.map((line) =>
       line.id === lineId ? { ...line, isOnline: !line.isOnline } : line
     );
     setLines(newLines);
 
     // Check master state
-    const allOnline = newLines.every(l => l.isOnline);
-    const allOffline = newLines.every(l => !l.isOnline);
+    const allOnline = newLines.every((l) => l.isOnline);
+    const allOffline = newLines.every((l) => !l.isOnline);
 
     if (allOnline) {
       setIsOnline(true);
@@ -78,7 +127,13 @@ export function Dashboard() {
     }
   };
 
-  const activeLineCount = lines.filter(l => l.isOnline).length;
+  const activeLineCount = lines.filter((l) => l.isOnline).length;
+
+  // Format balance for display
+  const formatBalance = (balance: number | undefined): string => {
+    if (balance === undefined) return '$0.00';
+    return `$${balance.toFixed(2)}`;
+  };
 
   return (
     <>
@@ -89,35 +144,62 @@ export function Dashboard() {
         <div className="blob blob-3"></div>
       </div>
 
+      {/* Incoming Call Modal */}
+      <IncomingCallModal
+        callData={incomingCall}
+        onAccept={acceptCall}
+        onDecline={declineCall}
+        autoDeclineSeconds={30}
+      />
+
       <div className="container">
         {/* Header */}
         <header className="header">
           <div className="logo">
             <div className="logo-icon">
-              <svg viewBox="0 0 24 24"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>
+              <svg viewBox="0 0 24 24">
+                <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z" />
+              </svg>
             </div>
-            <div className="logo-text">Call<span>Hub</span></div>
+            <div className="logo-text">
+              Call<span>Hub</span>
+            </div>
           </div>
           <div className="header-right">
-            <div className="time-display" id="current-time">{currentTime}</div>
-            <div className="user-profile">
-              <div className="user-avatar">C</div>
-              <span className="user-name">Cole</span>
+            {/* Balance Display */}
+            <div className="balance-display">
+              <span className="balance-label">Balance</span>
+              <span className="balance-value">{formatBalance(closer?.balance)}</span>
+            </div>
+            <div className="time-display" id="current-time">
+              {currentTime}
+            </div>
+            <div className="user-profile" onClick={signOut} title="Click to sign out">
+              <div className="user-avatar">
+                {closer?.full_name ? getInitials(closer.full_name) : '?'}
+              </div>
+              <span className="user-name">{closer?.full_name || 'User'}</span>
             </div>
           </div>
         </header>
 
         {/* Master Toggle Section */}
-        <section className={`master-section ${isOnline ? 'online' : 'offline'}`} id="master-section">
+        <section
+          className={`master-section ${isOnline ? 'online' : 'offline'}`}
+          id="master-section"
+        >
           <div className="status-text">System Status</div>
           <div style={{ position: 'relative', display: 'inline-block' }}>
             <div className="pulse-ring"></div>
             <button
-              className={`power-button ${isOnline ? 'online' : 'offline'}`}
+              className={`power-button ${isOnline ? 'online' : 'offline'} ${isUpdating ? 'updating' : ''}`}
               id="master-toggle"
               onClick={handleMasterToggle}
+              disabled={isUpdating}
             >
-              <svg viewBox="0 0 24 24"><path d="M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-2.19 1.01-4.14 2.58-5.42L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z"/></svg>
+              <svg viewBox="0 0 24 24">
+                <path d="M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-2.19 1.01-4.14 2.58-5.42L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z" />
+              </svg>
             </button>
           </div>
           <div className="main-status" id="main-status">
@@ -130,7 +212,7 @@ export function Dashboard() {
 
         {/* Phone Lines Grid */}
         <section className="lines-grid">
-          {lines.map(line => (
+          {lines.map((line) => (
             <div
               key={line.id}
               className={`line-card ${line.isOnline ? 'online' : 'offline'}`}
@@ -157,7 +239,9 @@ export function Dashboard() {
         <section className="stats-grid">
           <div className="stat-card">
             <div className="stat-icon">
-              <svg viewBox="0 0 24 24"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>
+              <svg viewBox="0 0 24 24">
+                <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z" />
+              </svg>
             </div>
             <div className="stat-content">
               <div className="stat-value">12</div>
@@ -166,7 +250,9 @@ export function Dashboard() {
           </div>
           <div className="stat-card">
             <div className="stat-icon">
-              <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+              <svg viewBox="0 0 24 24">
+                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+              </svg>
             </div>
             <div className="stat-content">
               <div className="stat-value">40%</div>
@@ -175,7 +261,9 @@ export function Dashboard() {
           </div>
           <div className="stat-card">
             <div className="stat-icon">
-              <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+              <svg viewBox="0 0 24 24">
+                <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z" />
+              </svg>
             </div>
             <div className="stat-content">
               <div className="stat-value">4:32</div>
@@ -184,7 +272,9 @@ export function Dashboard() {
           </div>
           <div className="stat-card">
             <div className="stat-icon">
-              <svg viewBox="0 0 24 24"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM9 10H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm-8 4H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2z"/></svg>
+              <svg viewBox="0 0 24 24">
+                <path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM9 10H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm-8 4H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2z" />
+              </svg>
             </div>
             <div className="stat-content">
               <div className="stat-value">47</div>
