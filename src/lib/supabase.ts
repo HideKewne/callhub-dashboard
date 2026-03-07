@@ -89,23 +89,67 @@ export async function claimCall(callId: string): Promise<{
 
 /**
  * Update closer availability status
+ * Uses Supabase directly (RLS allows users to update their own record)
  */
 export async function updateAvailability(isAvailable: boolean): Promise<{
   success: boolean;
   error?: string;
 }> {
   try {
-    const response = await backendRequest('wingman-tech-availability', {
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    const { error } = await supabase
+      .from('closers')
+      .update({
+        is_available: isAvailable,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', user.id);
+
+    if (error) {
+      console.error('Supabase update error:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to update availability',
+    };
+  }
+}
+
+/**
+ * Create SIP credentials for a new closer
+ * Called after signup to enable WebRTC calling
+ */
+export async function createSipCredentials(closerId: string, email: string): Promise<{
+  success: boolean;
+  sip_username?: string;
+  sip_domain?: string;
+  error?: string;
+}> {
+  try {
+    const response = await fetch(`${BACKEND_API_URL}/wingman-tech-new-closer`, {
       method: 'POST',
-      body: JSON.stringify({ is_available: isAvailable }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ closer_id: closerId, email }),
     });
 
     const data = await response.json();
     return data;
   } catch (error) {
+    console.error('Failed to create SIP credentials:', error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to update availability',
+      error: error instanceof Error ? error.message : 'Failed to create SIP credentials',
     };
   }
 }

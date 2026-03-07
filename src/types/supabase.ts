@@ -23,6 +23,9 @@ export interface Database {
           balance: number;
           min_balance: number;
           is_available: boolean;
+          sip_username: string | null;
+          sip_password: string | null;
+          twilio_cred_sid: string | null;
           created_at: string;
           updated_at: string;
         };

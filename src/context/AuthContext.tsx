@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { User, Session, AuthChangeEvent } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import { supabase, createSipCredentials } from '../lib/supabase';
 import type { Closer, CloserLicense } from '../types/supabase';
 
 interface AuthContextType {
@@ -71,36 +71,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Initialize auth state
+  // Initialize auth state using onAuthStateChange as single source of truth
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-      }
-      setLoading(false);
-    });
+    let mounted = true;
 
-    // Listen for auth changes
+    // Set up auth state listener FIRST (Supabase v2 recommended pattern)
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(
       async (event: AuthChangeEvent, session: Session | null) => {
+        if (!mounted) return;
+
+        console.log('Auth state change:', event, session?.user?.email);
+
         setSession(session);
         setUser(session?.user ?? null);
 
-        if (event === 'SIGNED_IN' && session?.user) {
-          await fetchProfile(session.user.id);
-        } else if (event === 'SIGNED_OUT') {
+        if (session?.user) {
+          // Fetch profile in background, don't block loading state
+          fetchProfile(session.user.id).catch(console.error);
+        } else {
           setCloser(null);
           setLicenses([]);
         }
+
+        // Always set loading to false after any auth state change
+        setLoading(false);
       }
     );
 
-    return () => subscription.unsubscribe();
+    // Get initial session (triggers onAuthStateChange with INITIAL_SESSION)
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        console.error('Error getting session:', error);
+      }
+      // If no session and no auth state change fired yet, stop loading
+      if (!session && mounted) {
+        setLoading(false);
+      }
+    }).catch((err) => {
+      console.error('getSession error:', err);
+      if (mounted) {
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Sign in with email and password
@@ -150,6 +169,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Don't fail signup if profile creation fails
           // Profile can be created later
         }
+
+        // Create SIP credentials for WebRTC calling
+        // This runs in background - don't block signup
+        createSipCredentials(data.user.id, email)
+          .then((result) => {
+            if (result.success) {
+              console.log('SIP credentials created:', result.sip_username);
+            } else {
+              console.error('Failed to create SIP credentials:', result.error);
+            }
+          })
+          .catch((err) => {
+            console.error('SIP credential creation error:', err);
+          });
       }
 
       return { error: null };

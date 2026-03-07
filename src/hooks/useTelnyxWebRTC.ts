@@ -10,6 +10,8 @@ interface TelnyxCredentials {
 interface CallState {
   isActive: boolean;
   isConnecting: boolean;
+  isRinging: boolean;  // Added: specifically indicates 'ringing' state for answering
+  isAnswering: boolean;  // Added: for SIP transfers that skip ringing
   isMuted: boolean;
   isOnHold: boolean;
   duration: number;
@@ -41,6 +43,8 @@ export function useTelnyxWebRTC(): UseTelnyxWebRTCResult {
   const [callState, setCallState] = useState<CallState>({
     isActive: false,
     isConnecting: false,
+    isRinging: false,
+    isAnswering: false,
     isMuted: false,
     isOnHold: false,
     duration: 0,
@@ -76,6 +80,10 @@ export function useTelnyxWebRTC(): UseTelnyxWebRTCResult {
       return;
     }
 
+    console.log('🔌 Telnyx WebRTC: Starting connection...');
+    console.log('🔌 Login:', credentials.login);
+    console.log('🔌 Password length:', credentials.password?.length || 0);
+
     setIsConnecting(true);
     setError(null);
 
@@ -87,9 +95,15 @@ export function useTelnyxWebRTC(): UseTelnyxWebRTCResult {
         ringbackFile: undefined,
       });
 
+      // CRITICAL: Set the remote element for audio output
+      // This tells the SDK where to play incoming audio from the call
+      client.remoteElement = 'telnyx-remote-audio';
+      console.log('🔌 TelnyxRTC client created successfully');
+      console.log('🔊 Remote audio element set to: telnyx-remote-audio');
+
       // Handle ready event
       client.on('telnyx.ready', () => {
-        console.log('Telnyx WebRTC: Ready');
+        console.log('✅ Telnyx WebRTC: READY - Registered with username:', credentials.login);
         setIsConnected(true);
         setIsConnecting(false);
       });
@@ -103,26 +117,36 @@ export function useTelnyxWebRTC(): UseTelnyxWebRTCResult {
 
       // Handle errors
       client.on('telnyx.error', (errorEvent: { error?: { message?: string } }) => {
-        console.error('Telnyx WebRTC Error:', errorEvent);
-        setError(errorEvent.error?.message || 'Connection error');
+        console.error('❌ Telnyx WebRTC Error:', errorEvent);
+        const errorMsg = errorEvent.error?.message || 'Connection error';
+        console.error('❌ Error message:', errorMsg);
+        setError(errorMsg);
         setIsConnecting(false);
       });
 
       // Handle incoming notification (incoming call)
       client.on('telnyx.notification', (notification: { type: string; call?: Call }) => {
-        console.log('Telnyx Notification:', notification);
+        console.log('🔔 Telnyx Notification:', notification.type, notification);
 
         if (notification.type === 'callUpdate' && notification.call) {
           const call = notification.call;
+          console.log('📞 Call Update - State:', call.state, 'Direction:', call.direction, 'ID:', call.id);
           callRef.current = call;
 
           handleCallStateChange(call);
         }
       });
 
+      // Add socket open handler to debug connection
+      client.on('telnyx.socket.open', () => {
+        console.log('🔌 Telnyx WebRTC: WebSocket OPENED');
+      });
+
       // Connect
+      console.log('🔌 Telnyx WebRTC: Calling connect()...');
       client.connect();
       clientRef.current = client;
+      console.log('🔌 Telnyx WebRTC: connect() called, waiting for events...');
     } catch (err) {
       console.error('Failed to initialize Telnyx:', err);
       setError(err instanceof Error ? err.message : 'Failed to initialize');
@@ -142,14 +166,31 @@ export function useTelnyxWebRTC(): UseTelnyxWebRTCResult {
           setCallState((prev) => ({
             ...prev,
             isConnecting: true,
+            isRinging: false,
+            isAnswering: false,
             direction: call.direction as 'inbound' | 'outbound',
           }));
           break;
 
         case 'ringing':
+          console.log('📞 Call now in RINGING state - ready to answer');
           setCallState((prev) => ({
             ...prev,
             isConnecting: true,
+            isRinging: true,  // Only true when actually ringing
+            isAnswering: false,
+            direction: call.direction as 'inbound' | 'outbound',
+          }));
+          break;
+
+        case 'answering':
+          // SIP transfers often skip 'ringing' and go straight to 'answering'
+          console.log('📞 Call now in ANSWERING state (SIP transfer in progress)');
+          setCallState((prev) => ({
+            ...prev,
+            isConnecting: true,
+            isRinging: false,
+            isAnswering: true,
             direction: call.direction as 'inbound' | 'outbound',
           }));
           break;
@@ -159,6 +200,8 @@ export function useTelnyxWebRTC(): UseTelnyxWebRTCResult {
             ...prev,
             isActive: true,
             isConnecting: false,
+            isRinging: false,
+            isAnswering: false,
             duration: 0,
           }));
           startDurationTimer();
@@ -178,6 +221,8 @@ export function useTelnyxWebRTC(): UseTelnyxWebRTCResult {
           setCallState({
             isActive: false,
             isConnecting: false,
+            isRinging: false,
+            isAnswering: false,
             isMuted: false,
             isOnHold: false,
             duration: 0,
@@ -207,6 +252,8 @@ export function useTelnyxWebRTC(): UseTelnyxWebRTCResult {
     setCallState({
       isActive: false,
       isConnecting: false,
+      isRinging: false,
+      isAnswering: false,
       isMuted: false,
       isOnHold: false,
       duration: 0,
@@ -216,8 +263,15 @@ export function useTelnyxWebRTC(): UseTelnyxWebRTCResult {
 
   // Answer incoming call
   const answer = useCallback(() => {
+    console.log('📞 answer() called');
+    console.log('📞 callRef.current:', callRef.current ? 'exists' : 'null');
+    console.log('📞 call state:', callRef.current?.state);
+
     if (callRef.current && callRef.current.state === 'ringing') {
+      console.log('📞 Answering call...');
       callRef.current.answer();
+    } else {
+      console.log('📞 Cannot answer - call not in ringing state');
     }
   }, []);
 

@@ -446,6 +446,13 @@ INSERT INTO area_code_mapping (area_code, state_code, state_name, city) VALUES
 -- Wyoming
 ('307', 'WY', 'Wyoming', 'Cheyenne'),
 
+-- New area codes added in 2024-2025
+('837', 'CA', 'California', 'Redding'),
+('621', 'TX', 'Texas', 'Houston'),
+('738', 'CA', 'California', 'Los Angeles'),
+('924', 'MN', 'Minnesota', 'Rochester'),
+('821', 'SC', 'South Carolina', 'Greenville'),
+
 -- US Territories
 ('340', 'VI', 'US Virgin Islands', 'Charlotte Amalie'),
 ('670', 'MP', 'Northern Mariana Islands', 'Saipan'),
