@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { StateSelector } from '../components/StateSelector';
+import { supabase } from '../lib/supabase';
 
 export function Signup() {
   const [email, setEmail] = useState('');
@@ -38,15 +39,32 @@ export function Signup() {
     setError('');
     setLoading(true);
 
-    const { error } = await signUp(email, password, fullName);
+    const { error, data } = await signUp(email, password, fullName);
 
     if (error) {
       setError(error.message);
       setLoading(false);
       setStep(1); // Go back to first step on error
     } else {
-      // Note: State licenses will be saved after email verification
-      // For now, just redirect to dashboard
+      // Save selected states to closer_licenses
+      // The closer ID is the same as the user ID (set during signup)
+      if (selectedStates.length > 0 && data?.user?.id) {
+        const licenses = selectedStates.map(stateCode => ({
+          closer_id: data.user!.id,
+          state_code: stateCode,
+          verified: false
+        }));
+
+        const { error: licenseError } = await supabase
+          .from('closer_licenses')
+          .insert(licenses);
+
+        if (licenseError) {
+          console.error('Error saving licenses:', licenseError);
+          // Don't fail signup if license save fails - can be fixed in Settings later
+        }
+      }
+
       navigate('/');
     }
   };

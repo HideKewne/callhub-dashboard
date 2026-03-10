@@ -1,16 +1,19 @@
 import { useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 interface NavItem {
   id: string;
   label: string;
   icon: React.ReactNode;
+  path?: string; // Optional path for navigation
 }
 
 const navItems: NavItem[] = [
   {
     id: 'dashboard',
     label: 'Dashboard',
+    path: '/',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="7" height="7" />
@@ -65,6 +68,7 @@ const navItems: NavItem[] = [
   {
     id: 'settings',
     label: 'Settings',
+    path: '/settings',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="3" />
@@ -81,7 +85,24 @@ interface SidebarProps {
 
 export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
   const { user, closer, signOut } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [activeItem, setActiveItem] = useState('dashboard');
+
+  // Determine active item based on current path
+  const getActiveItem = () => {
+    if (location.pathname === '/settings') return 'settings';
+    if (location.pathname === '/') return 'dashboard';
+    return activeItem;
+  };
+
+  const handleNavClick = (item: NavItem) => {
+    if (item.path) {
+      navigate(item.path);
+    } else {
+      setActiveItem(item.id);
+    }
+  };
 
   const getInitials = (name: string): string => {
     return name
@@ -127,8 +148,8 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
         {navItems.map((item) => (
           <button
             key={item.id}
-            className={`sidebar-nav-item ${activeItem === item.id ? 'active' : ''}`}
-            onClick={() => setActiveItem(item.id)}
+            className={`sidebar-nav-item ${getActiveItem() === item.id ? 'active' : ''}`}
+            onClick={() => handleNavClick(item)}
             title={isCollapsed ? item.label : undefined}
           >
             <span className="nav-icon">{item.icon}</span>

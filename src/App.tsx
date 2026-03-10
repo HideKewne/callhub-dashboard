@@ -3,6 +3,7 @@ import { useAuth } from './context/AuthContext';
 import Dashboard from './Dashboard';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
+import Settings from './pages/Settings';
 
 // Protected route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -70,6 +71,14 @@ function App() {
             <PublicRoute>
               <Signup />
             </PublicRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <Settings />
+            </ProtectedRoute>
           }
         />
         {/* Catch all - redirect to dashboard */}

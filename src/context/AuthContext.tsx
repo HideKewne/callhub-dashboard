@@ -16,7 +16,7 @@ interface AuthContextType {
   licenses: CloserLicense[];
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
+  signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null; data?: { user: User | null } }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -150,7 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       if (signUpError) {
-        return { error: signUpError };
+        return { error: signUpError, data: undefined };
       }
 
       // Create closer profile
@@ -185,9 +185,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
       }
 
-      return { error: null };
+      return { error: null, data: { user: data.user } };
     } catch (error) {
-      return { error: error as Error };
+      return { error: error as Error, data: undefined };
     }
   };
 
