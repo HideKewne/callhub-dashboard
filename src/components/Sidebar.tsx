@@ -127,7 +127,7 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
         </div>
         {!isCollapsed && (
           <span className="sidebar-logo-text">
-            Call<span>Hub</span>
+            Wing<span>Man</span>
           </span>
         )}
       </div>

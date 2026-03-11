@@ -92,7 +92,7 @@ export function Signup() {
                 </svg>
               </div>
               <div className="logo-text">
-                Call<span>Hub</span>
+                Wing<span>Man</span>
               </div>
             </div>
             <h1>{step === 1 ? 'Create Account' : 'Select Your States'}</h1>

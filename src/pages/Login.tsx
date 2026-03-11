@@ -45,7 +45,7 @@ export function Login() {
                 </svg>
               </div>
               <div className="logo-text">
-                Call<span>Hub</span>
+                Wing<span>Man</span>
               </div>
             </div>
             <h1>Welcome Back</h1>
