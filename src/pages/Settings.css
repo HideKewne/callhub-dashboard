@@ -244,7 +244,9 @@
   border-top: 1px solid var(--card-border);
 }
 
+/* Save Button with Fuse-Burning Edge Animation */
 .save-button {
+  position: relative;
   background: linear-gradient(135deg, var(--online), #00cc6a);
   border: none;
   border-radius: 12px;
@@ -254,6 +256,88 @@
   color: var(--bg-dark);
   cursor: pointer;
   transition: all 0.2s ease;
+  isolation: isolate;
+}
+
+/* Both lights hidden by default */
+.save-button::before,
+.save-button::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 14px;
+  padding: 2px;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+/* First light - starts at 0deg (right side) */
+.save-button::before {
+  background: conic-gradient(
+    from var(--spark1, 0deg),
+    transparent 0deg,
+    transparent 25deg,
+    rgba(0, 255, 136, 0.6) 35deg,
+    #ffffff 45deg,
+    rgba(0, 255, 136, 0.6) 55deg,
+    transparent 65deg,
+    transparent 360deg
+  );
+}
+
+/* Second light - starts at 180deg (left side, exactly opposite) */
+.save-button::after {
+  background: conic-gradient(
+    from var(--spark2, 180deg),
+    transparent 0deg,
+    transparent 25deg,
+    rgba(0, 255, 136, 0.6) 35deg,
+    #ffffff 45deg,
+    rgba(0, 255, 136, 0.6) 55deg,
+    transparent 65deg,
+    transparent 360deg
+  );
+}
+
+/* Show and animate on hover - separate animations for each light */
+.save-button:hover:not(:disabled)::before {
+  opacity: 1;
+  animation: spark1-rotate 5s linear infinite;
+}
+
+.save-button:hover:not(:disabled)::after {
+  opacity: 1;
+  animation: spark2-rotate 5s linear infinite;
+}
+
+@property --spark1 {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@property --spark2 {
+  syntax: '<angle>';
+  initial-value: 180deg;
+  inherits: false;
+}
+
+/* First spark rotates from 0 to 360 */
+@keyframes spark1-rotate {
+  from { --spark1: 0deg; }
+  to { --spark1: 360deg; }
+}
+
+/* Second spark rotates from 180 to 540 (always 180 ahead) */
+@keyframes spark2-rotate {
+  from { --spark2: 180deg; }
+  to { --spark2: 540deg; }
 }
 
 .save-button:hover:not(:disabled) {

@@ -52,7 +52,7 @@ export function Signup() {
         const licenses = selectedStates.map(stateCode => ({
           closer_id: data.user!.id,
           state_code: stateCode,
-          verified: false
+          verified: true
         }));
 
         const { error: licenseError } = await supabase

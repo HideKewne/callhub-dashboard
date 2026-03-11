@@ -135,7 +135,7 @@ export function Settings() {
         const newLicenses = toAdd.map(stateCode => ({
           closer_id: user.id,
           state_code: stateCode,
-          verified: false
+          verified: true
         }));
 
         const { error: insertError } = await supabase

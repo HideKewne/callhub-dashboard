@@ -159,7 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           id: data.user.id,
           email,
           full_name: fullName,
-          balance: 0,
+          balance: 1.50,
           min_balance: 0.5,
           is_available: false,
         });

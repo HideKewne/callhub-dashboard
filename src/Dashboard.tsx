@@ -210,7 +210,7 @@ export function Dashboard() {
     setIsUpdating(false);
   };
 
-  // Individual line toggle handler
+  /* Individual line toggle handler (hidden for now)
   const handleLineToggle = (lineId: number) => {
     const newLines = lines.map((line) =>
       line.id === lineId ? { ...line, isOnline: !line.isOnline } : line
@@ -229,6 +229,7 @@ export function Dashboard() {
   };
 
   const activeLineCount = lines.filter((l) => l.isOnline).length;
+  */
 
   return (
     <>
@@ -322,12 +323,10 @@ export function Dashboard() {
                         : 'CONNECTING...')
                 : 'OFFLINE'}
             </div>
-            <div className="lines-counter">
-              <strong id="active-lines">{activeLineCount}</strong>/5 Lines Active
-            </div>
+            {/* Lines counter hidden for now */}
           </section>
 
-          {/* Phone Lines Grid */}
+          {/* Phone Lines Grid - Hidden for now, will be re-enabled later
           <section className="lines-grid">
             {lines.map((line) => (
               <div
@@ -351,6 +350,7 @@ export function Dashboard() {
               </div>
             ))}
           </section>
+          */}
 
           {/* Stats Cards */}
           <section className="stats-grid">

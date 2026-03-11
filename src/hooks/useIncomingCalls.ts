@@ -56,43 +56,56 @@ export function useIncomingCalls(options: UseIncomingCallsOptions = {}): UseInco
   useEffect(() => {
     console.log('[IncomingCalls] useEffect RUNNING - setting up broadcast subscription');
 
-    // Subscribe to broadcast channel for incoming calls (n8n sends correct state data)
+    // Subscribe to postgres_changes on call_logs table for reliable real-time notifications
+    // (Supabase REST API broadcast has known reliability issues)
     const channel = supabase.channel('incoming_calls');
 
     channel
-      // Listen for broadcast events from n8n (contains correct lead_state)
+      // Listen for INSERT on call_logs table (more reliable than broadcast)
       .on(
-        'broadcast',
-        { event: 'incoming_call' },
-        (payload) => {
-          console.log('[IncomingCalls] 🔔 BROADCAST RECEIVED:', JSON.stringify(payload));
-          const data = payload.payload as {
-            call_log_id: string;
-            display_text: string;
-            lead_state: string;
-            lead_city: string;
-            eligible_closer_ids: string[];
-            timestamp: string;
-          };
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'call_logs' },
+        async (payload) => {
+          console.log('[IncomingCalls] 🔔 postgres_changes INSERT received, fetching full record...');
+          const payloadRow = payload.new as { id: string; status: string };
+
+          // Only process unclaimed calls (status = 'pending' or 'ringing')
+          if (payloadRow.status && !['pending', 'ringing'].includes(payloadRow.status)) {
+            console.log('[IncomingCalls] Ignoring non-pending call:', payloadRow.status);
+            return;
+          }
+
+          // Fetch full record from Supabase to avoid CHAR(2) truncation issue in realtime payload
+          const { data: fullRecord, error } = await supabase
+            .from('call_logs')
+            .select('id, lead_state, lead_city, eligible_closer_ids, created_at, status')
+            .eq('id', payloadRow.id)
+            .single();
+
+          if (error || !fullRecord) {
+            console.error('[IncomingCalls] Failed to fetch call_log:', error);
+            return;
+          }
+
+          console.log('[IncomingCalls] Fetched full record:', JSON.stringify(fullRecord));
 
           const currentCloserId = closerIdRef.current;
 
-          // ALWAYS rebuild display_text using STATE_NAMES for proper formatting
-          // Format: "Incoming Caller: Cleveland, Ohio (OH)"
-          const city = data.lead_city || 'Unknown';
-          const stateCode = data.lead_state || '';
+          // Build display text from lead location
+          const city = (fullRecord.lead_city || 'Unknown').trim();
+          const stateCode = (fullRecord.lead_state || '').trim();
           const stateName = STATE_NAMES[stateCode] || stateCode || 'Unknown';
           const displayText = stateCode && stateCode !== 'XX'
             ? `Incoming Caller: ${city}, ${stateName} (${stateCode})`
             : `Incoming Caller: ${city}`;
 
           const callData: IncomingCallData = {
-            call_log_id: data.call_log_id,
+            call_log_id: fullRecord.id,
             display_text: displayText,
-            lead_state: data.lead_state || '',
-            lead_city: data.lead_city || '',
-            eligible_closer_ids: data.eligible_closer_ids || [],
-            timestamp: data.timestamp
+            lead_state: fullRecord.lead_state || '',
+            lead_city: fullRecord.lead_city || '',
+            eligible_closer_ids: fullRecord.eligible_closer_ids || [],
+            timestamp: fullRecord.created_at
           };
 
           console.log('[IncomingCalls] Checking eligibility - closerId:', currentCloserId, 'eligible_ids:', callData.eligible_closer_ids);
@@ -108,21 +121,46 @@ export function useIncomingCalls(options: UseIncomingCallsOptions = {}): UseInco
           }
         }
       )
-      // Listen for call_claimed broadcast (dismiss modal if someone else claimed)
+      // Listen for UPDATE on call_logs (when someone claims a call)
       .on(
-        'broadcast',
-        { event: 'call_claimed' },
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'call_logs' },
         (payload) => {
-          console.log('[IncomingCalls] Call claimed broadcast:', payload);
-          const data = payload.payload as { call_id: string; claimed_by: string };
+          console.log('[IncomingCalls] postgres_changes UPDATE:', payload);
+          const updatedRow = payload.new as { id: string; claimed_by: string; status: string };
           const currentCloserId = closerIdRef.current;
 
-          // If someone else claimed the call, dismiss the modal
-          if (incomingCall && data.call_id === incomingCall.call_log_id && data.claimed_by !== currentCloserId) {
+          // If someone else claimed the call we're showing, dismiss the modal
+          if (incomingCall &&
+              updatedRow.id === incomingCall.call_log_id &&
+              updatedRow.claimed_by &&
+              updatedRow.claimed_by !== currentCloserId) {
             console.log('[IncomingCalls] Call taken by another closer - dismissing modal');
             setIncomingCall(null);
             setClaimError('Call was taken by another agent');
             stopRingtone();
+          }
+        }
+      )
+      // Listen for BROADCAST events (n8n sends directly via Supabase REST API)
+      .on(
+        'broadcast',
+        { event: 'incoming_call' },
+        (payload) => {
+          console.log('[IncomingCalls] 🔔 BROADCAST incoming_call:', JSON.stringify(payload));
+          const callData = payload.payload as IncomingCallData;
+          const currentCloserId = closerIdRef.current;
+
+          console.log('[IncomingCalls] Checking eligibility - closerId:', currentCloserId, 'eligible_ids:', callData.eligible_closer_ids);
+
+          // Check if this closer is eligible for this call
+          if (currentCloserId && callData.eligible_closer_ids?.includes(currentCloserId)) {
+            console.log('[IncomingCalls] ✅ ELIGIBLE - showing modal');
+            setIncomingCall(callData);
+            setClaimError(null);
+            playRingtone();
+          } else {
+            console.log('[IncomingCalls] ❌ Not eligible for this call');
           }
         }
       )

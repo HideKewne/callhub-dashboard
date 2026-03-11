@@ -72,7 +72,9 @@ export async function claimCall(callId: string): Promise<{
   error?: string;
 }> {
   try {
-    const response = await backendRequest('wingman-tech-claim', {
+    // Use WhiteRock-specific claim endpoint for Telnyx calls
+    // The generic wingman-tech-claim is for Vapi calls
+    const response = await backendRequest('wingman-tech-claim-whiterock', {
       method: 'POST',
       body: JSON.stringify({ call_id: callId }),
     });

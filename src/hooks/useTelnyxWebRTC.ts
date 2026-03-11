@@ -35,6 +35,7 @@ export function useTelnyxWebRTC(): UseTelnyxWebRTCResult {
   const clientRef = useRef<TelnyxRTC | null>(null);
   const callRef = useRef<Call | null>(null);
   const durationIntervalRef = useRef<number | null>(null);
+  const wasOnHoldRef = useRef<boolean>(false);
 
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -195,19 +196,32 @@ export function useTelnyxWebRTC(): UseTelnyxWebRTCResult {
           }));
           break;
 
-        case 'active':
+        case 'active': {
+          // Check if resuming from hold (using ref to avoid side effects in state setter)
+          const isResumingFromHold = wasOnHoldRef.current;
+          wasOnHoldRef.current = false; // Reset the ref
+
+          if (!isResumingFromHold) {
+            // New call - start the duration timer
+            startDurationTimer();
+          }
+          // If resuming from hold, timer is already running, don't restart
+
           setCallState((prev) => ({
             ...prev,
             isActive: true,
             isConnecting: false,
             isRinging: false,
             isAnswering: false,
-            duration: 0,
+            isOnHold: false,
+            // Preserve duration when resuming from hold
+            duration: isResumingFromHold ? prev.duration : 0,
           }));
-          startDurationTimer();
           break;
+        }
 
         case 'held':
+          wasOnHoldRef.current = true;
           setCallState((prev) => ({
             ...prev,
             isOnHold: true,
@@ -303,8 +317,11 @@ export function useTelnyxWebRTC(): UseTelnyxWebRTCResult {
   const toggleHold = useCallback(() => {
     if (callRef.current && callState.isActive) {
       if (callState.isOnHold) {
+        // Resuming from hold
         callRef.current.unhold();
       } else {
+        // Putting on hold - set ref immediately so it's ready when 'active' fires on resume
+        wasOnHoldRef.current = true;
         callRef.current.hold();
       }
       setCallState((prev) => ({
