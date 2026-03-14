@@ -133,13 +133,20 @@ export function Dashboard() {
   }, [webrtcError]);
 
   // Connect/disconnect WebRTC based on online status
-  // Includes 2s delay on reconnection to avoid rapid loops from transient disconnects
+  // CRITICAL: Do NOT reconnect during an active call - creating a new client kills the call
   useEffect(() => {
     const sipUsername = closer?.sip_username;
     const sipPassword = closer?.sip_password;
 
     if (isOnline && sipUsername && sipPassword && !webrtcConnected && !webrtcConnecting) {
-      // Delay reconnection to avoid rapid loops when socket closes and reopens quickly
+      // If there's an active call, DON'T reconnect - it would destroy the call
+      // The audio stream is peer-to-peer and works without the signaling socket
+      if (callState.isActive || callState.isConnecting) {
+        console.log('⚠️ Socket disconnected but call is active - NOT reconnecting (would kill call)');
+        return;
+      }
+
+      // No active call - safe to reconnect with a small delay
       const timeout = setTimeout(() => {
         console.log('🔄 Reconnecting Telnyx WebRTC with username:', sipUsername);
         connectWebRTC({ login: sipUsername, password: sipPassword });
@@ -149,7 +156,7 @@ export function Dashboard() {
       console.log('Going offline, disconnecting WebRTC');
       disconnectWebRTC();
     }
-  }, [isOnline, closer?.sip_username, closer?.sip_password, webrtcConnected, webrtcConnecting, connectWebRTC, disconnectWebRTC]);
+  }, [isOnline, closer?.sip_username, closer?.sip_password, webrtcConnected, webrtcConnecting, callState.isActive, callState.isConnecting, connectWebRTC, disconnectWebRTC]);
 
   // Clear active call data when WebRTC call ends
   useEffect(() => {

@@ -109,27 +109,25 @@ export function useTelnyxWebRTC(): UseTelnyxWebRTCResult {
         setIsConnecting(false);
       });
 
-      // Handle socket close - CRITICAL: clear clientRef so reconnection works
+      // Handle socket close
+      // CRITICAL: If there's an active call, DON'T destroy anything.
+      // WebRTC audio is peer-to-peer and survives without the signaling socket.
+      // Creating a new client would kill the active call.
       client.on('telnyx.socket.close', () => {
         console.log('⚠️ Telnyx WebRTC: Socket closed');
         setIsConnected(false);
         setIsConnecting(false);
 
-        // Clear client ref so connect() isn't blocked on reconnection attempts
-        // Without this, connect() sees clientRef.current exists and returns early
-        clientRef.current = null;
-
-        // If there was an active call, it's now dead - clean up state
         if (callRef.current) {
-          console.log('⚠️ Socket closed during ACTIVE CALL - call lost');
-          callRef.current = null;
-          stopDurationTimer();
-          setCallState({
-            isActive: false, isConnecting: false, isRinging: false,
-            isAnswering: false, isMuted: false, isOnHold: false,
-            duration: 0, direction: null,
-          });
+          // ACTIVE CALL: Keep everything intact - don't clear clientRef or callRef
+          // The audio stream is peer-to-peer and may still be flowing
+          // If we clear clientRef, Dashboard will create a NEW client, killing this call
+          console.log('⚠️ Socket closed during ACTIVE CALL - keeping call alive (audio is P2P)');
+          return;
         }
+
+        // NO ACTIVE CALL: Safe to clear client for fresh reconnection
+        clientRef.current = null;
       });
 
       // Handle errors
