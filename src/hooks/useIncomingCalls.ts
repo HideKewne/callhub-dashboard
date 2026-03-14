@@ -24,6 +24,11 @@ interface IncomingCallData {
   lead_city: string;
   eligible_closer_ids: string[];
   timestamp: string;
+  // Briefing data for closer popup (Cole script)
+  closer_briefing?: string | null;
+  beneficiary_name?: string | null;
+  coverage_type?: string | null;
+  customer_age?: number | null;
 }
 
 interface UseIncomingCallsOptions {
@@ -78,7 +83,7 @@ export function useIncomingCalls(options: UseIncomingCallsOptions = {}): UseInco
           // Fetch full record from Supabase to avoid CHAR(2) truncation issue in realtime payload
           const { data: fullRecord, error } = await supabase
             .from('call_logs')
-            .select('id, lead_state, lead_city, eligible_closer_ids, created_at, status')
+            .select('id, lead_state, lead_city, eligible_closer_ids, created_at, status, closer_briefing, beneficiary_name, coverage_type, customer_age')
             .eq('id', payloadRow.id)
             .single();
 
@@ -105,7 +110,12 @@ export function useIncomingCalls(options: UseIncomingCallsOptions = {}): UseInco
             lead_state: fullRecord.lead_state || '',
             lead_city: fullRecord.lead_city || '',
             eligible_closer_ids: fullRecord.eligible_closer_ids || [],
-            timestamp: fullRecord.created_at
+            timestamp: fullRecord.created_at,
+            // Briefing data for closer popup
+            closer_briefing: fullRecord.closer_briefing,
+            beneficiary_name: fullRecord.beneficiary_name,
+            coverage_type: fullRecord.coverage_type,
+            customer_age: fullRecord.customer_age
           };
 
           console.log('[IncomingCalls] Checking eligibility - closerId:', currentCloserId, 'eligible_ids:', callData.eligible_closer_ids);
@@ -121,16 +131,78 @@ export function useIncomingCalls(options: UseIncomingCallsOptions = {}): UseInco
           }
         }
       )
-      // Listen for UPDATE on call_logs (when someone claims a call)
+      // Listen for UPDATE on call_logs (qualified calls AND claims)
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'call_logs' },
-        (payload) => {
+        async (payload) => {
           console.log('[IncomingCalls] postgres_changes UPDATE:', payload);
-          const updatedRow = payload.new as { id: string; claimed_by: string; status: string };
+          const updatedRow = payload.new as {
+            id: string;
+            claimed_by: string;
+            status: string;
+            eligible_closer_ids?: string[];
+          };
+          const oldRow = payload.old as { status?: string; eligible_closer_ids?: string[] };
           const currentCloserId = closerIdRef.current;
 
-          // If someone else claimed the call we're showing, dismiss the modal
+          // CASE 1: New qualified call (status changed to 'qualified' with eligible_closer_ids)
+          if (updatedRow.status === 'qualified' &&
+              updatedRow.eligible_closer_ids &&
+              updatedRow.eligible_closer_ids.length > 0 &&
+              oldRow.status !== 'qualified') {
+            console.log('[IncomingCalls] 🔔 QUALIFIED UPDATE detected!');
+
+            // Check if this closer is eligible
+            if (currentCloserId && updatedRow.eligible_closer_ids.includes(currentCloserId)) {
+              console.log('[IncomingCalls] ✅ ELIGIBLE for qualified call - fetching full record...');
+
+              // Fetch full record from Supabase
+              const { data: fullRecord, error } = await supabase
+                .from('call_logs')
+                .select('id, lead_state, lead_city, eligible_closer_ids, created_at, status, closer_briefing, beneficiary_name, coverage_type, customer_age')
+                .eq('id', updatedRow.id)
+                .single();
+
+              if (error || !fullRecord) {
+                console.error('[IncomingCalls] Failed to fetch call_log:', error);
+                return;
+              }
+
+              console.log('[IncomingCalls] Fetched qualified call:', JSON.stringify(fullRecord));
+
+              // Build display text from lead location
+              const city = (fullRecord.lead_city || 'Unknown').trim();
+              const stateCode = (fullRecord.lead_state || '').trim();
+              const stateName = STATE_NAMES[stateCode] || stateCode || 'Unknown';
+              const displayText = stateCode && stateCode !== 'XX'
+                ? `Incoming Caller: ${city}, ${stateName} (${stateCode})`
+                : `Incoming Caller: ${city}`;
+
+              const callData: IncomingCallData = {
+                call_log_id: fullRecord.id,
+                display_text: displayText,
+                lead_state: fullRecord.lead_state || '',
+                lead_city: fullRecord.lead_city || '',
+                eligible_closer_ids: fullRecord.eligible_closer_ids || [],
+                timestamp: fullRecord.created_at,
+                closer_briefing: fullRecord.closer_briefing,
+                beneficiary_name: fullRecord.beneficiary_name,
+                coverage_type: fullRecord.coverage_type,
+                customer_age: fullRecord.customer_age
+              };
+
+              console.log('[IncomingCalls] ✅ SHOWING MODAL for qualified call');
+              setIncomingCall(callData);
+              setClaimError(null);
+              playRingtone();
+            } else {
+              console.log('[IncomingCalls] ❌ Not eligible for this qualified call');
+            }
+            return;
+          }
+
+          // CASE 2: Someone else claimed the call we're showing
           if (incomingCall &&
               updatedRow.id === incomingCall.call_log_id &&
               updatedRow.claimed_by &&

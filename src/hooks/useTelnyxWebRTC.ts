@@ -109,11 +109,27 @@ export function useTelnyxWebRTC(): UseTelnyxWebRTCResult {
         setIsConnecting(false);
       });
 
-      // Handle socket close
+      // Handle socket close - CRITICAL: clear clientRef so reconnection works
       client.on('telnyx.socket.close', () => {
-        console.log('Telnyx WebRTC: Socket closed');
+        console.log('⚠️ Telnyx WebRTC: Socket closed');
         setIsConnected(false);
         setIsConnecting(false);
+
+        // Clear client ref so connect() isn't blocked on reconnection attempts
+        // Without this, connect() sees clientRef.current exists and returns early
+        clientRef.current = null;
+
+        // If there was an active call, it's now dead - clean up state
+        if (callRef.current) {
+          console.log('⚠️ Socket closed during ACTIVE CALL - call lost');
+          callRef.current = null;
+          stopDurationTimer();
+          setCallState({
+            isActive: false, isConnecting: false, isRinging: false,
+            isAnswering: false, isMuted: false, isOnHold: false,
+            duration: 0, direction: null,
+          });
+        }
       });
 
       // Handle errors
@@ -330,6 +346,62 @@ export function useTelnyxWebRTC(): UseTelnyxWebRTCResult {
       }));
     }
   }, [callState.isActive, callState.isOnHold]);
+
+  // Web Lock: prevent browser from throttling/freezing this tab during active calls
+  useEffect(() => {
+    if (!callState.isActive || !('locks' in navigator)) return;
+
+    let releaseLock: (() => void) | null = null;
+
+    navigator.locks.request(
+      'wingman-active-call',
+      { mode: 'exclusive' },
+      () => new Promise<void>((resolve) => { releaseLock = resolve; })
+    );
+
+    console.log('🔒 Web Lock acquired - tab will not be throttled during call');
+
+    return () => {
+      releaseLock?.();
+      console.log('🔓 Web Lock released - call ended');
+    };
+  }, [callState.isActive]);
+
+  // Web Worker keepalive: workers are NOT throttled in background tabs
+  // This keeps the tab's event loop alive as a second layer of protection
+  useEffect(() => {
+    if (!callState.isActive) return;
+
+    const workerCode = `
+      let interval = null;
+      self.onmessage = function(e) {
+        if (e.data === 'start') {
+          interval = setInterval(function() { self.postMessage('ping'); }, 15000);
+        } else if (e.data === 'stop') {
+          if (interval) clearInterval(interval);
+        }
+      };
+    `;
+    const blob = new Blob([workerCode], { type: 'application/javascript' });
+    const url = URL.createObjectURL(blob);
+    const worker = new Worker(url);
+    worker.postMessage('start');
+
+    worker.onmessage = () => {
+      if (clientRef.current) {
+        console.log('💓 Keepalive ping - WebRTC connection active');
+      }
+    };
+
+    console.log('💓 Keepalive worker started for active call');
+
+    return () => {
+      worker.postMessage('stop');
+      worker.terminate();
+      URL.revokeObjectURL(url);
+      console.log('💓 Keepalive worker stopped');
+    };
+  }, [callState.isActive]);
 
   // Cleanup on unmount
   useEffect(() => {

@@ -3,6 +3,7 @@ import { useAuth } from './context/AuthContext';
 import { updateAvailability } from './lib/supabase';
 import { IncomingCallModal } from './components/IncomingCallModal';
 import { ActiveCall } from './components/ActiveCall';
+import { BriefingPopup } from './components/BriefingPopup';
 import { useIncomingCalls, unlockAudio } from './hooks/useIncomingCalls';
 import { useTelnyxWebRTC } from './hooks/useTelnyxWebRTC';
 import { Sidebar } from './components/Sidebar';
@@ -132,17 +133,19 @@ export function Dashboard() {
   }, [webrtcError]);
 
   // Connect/disconnect WebRTC based on online status
+  // Includes 2s delay on reconnection to avoid rapid loops from transient disconnects
   useEffect(() => {
-    // Use sip_username and sip_password for Telnyx WebRTC authentication
     const sipUsername = closer?.sip_username;
     const sipPassword = closer?.sip_password;
 
     if (isOnline && sipUsername && sipPassword && !webrtcConnected && !webrtcConnecting) {
-      // Connect to Telnyx WebRTC when going online
-      console.log('Going online, connecting Telnyx WebRTC with username:', sipUsername);
-      connectWebRTC({ login: sipUsername, password: sipPassword });
+      // Delay reconnection to avoid rapid loops when socket closes and reopens quickly
+      const timeout = setTimeout(() => {
+        console.log('🔄 Reconnecting Telnyx WebRTC with username:', sipUsername);
+        connectWebRTC({ login: sipUsername, password: sipPassword });
+      }, 2000);
+      return () => clearTimeout(timeout);
     } else if (!isOnline && webrtcConnected) {
-      // Disconnect from Telnyx WebRTC when going offline
       console.log('Going offline, disconnecting WebRTC');
       disconnectWebRTC();
     }
@@ -263,6 +266,15 @@ export function Dashboard() {
           onToggleHold={toggleHold}
         />
       )}
+
+      {/* Briefing Popup (shown during active call when briefing data exists) */}
+      <BriefingPopup
+        isVisible={!!(callState.isActive && activeCallData?.closer_briefing)}
+        closerBriefing={activeCallData?.closer_briefing}
+        beneficiaryName={activeCallData?.beneficiary_name}
+        coverageType={activeCallData?.coverage_type}
+        customerAge={activeCallData?.customer_age}
+      />
 
       {/* App Layout with Sidebar */}
       <div className={`app-layout ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
