@@ -187,11 +187,15 @@ export function Dashboard() {
   }, []);
 
   // Sync with closer's availability from database
+  // CRITICAL: Skip during active calls! When Cole accepts a call, n8n sets
+  // is_available=false in DB. If Supabase token refreshes (e.g. on tab switch-back),
+  // fetchProfile() re-fetches closer with is_available=false, which would set
+  // isOnline=false and trigger disconnectWebRTC(), killing the active call.
   useEffect(() => {
-    if (closer) {
+    if (closer && !callState.isActive && !callState.isConnecting) {
       setIsOnline(closer.is_available);
     }
-  }, [closer]);
+  }, [closer, callState.isActive, callState.isConnecting]);
 
   // Master toggle handler
   const handleMasterToggle = async () => {
