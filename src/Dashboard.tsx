@@ -158,12 +158,18 @@ export function Dashboard() {
     }
   }, [isOnline, closer?.sip_username, closer?.sip_password, webrtcConnected, webrtcConnecting, callState.isActive, callState.isConnecting, connectWebRTC, disconnectWebRTC]);
 
-  // Clear active call data when WebRTC call ends
+  // Clear active call data when WebRTC call ends + restore online status
   useEffect(() => {
     if (!callState.isActive && activeCallData) {
       // Call ended, clear active call data after a short delay
       const timeout = setTimeout(() => {
         clearActiveCall();
+        // Restore online status: n8n set is_available=false when call was accepted,
+        // so we need to flip it back now that the call is done.
+        // The closer was online before the call, they should stay online after.
+        setIsOnline(true);
+        updateAvailability(true);
+        console.log('📞 Call ended - restoring online status');
       }, 500);
       return () => clearTimeout(timeout);
     }
