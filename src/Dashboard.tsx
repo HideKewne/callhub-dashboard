@@ -1,19 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from './context/AuthContext';
-import { updateAvailability } from './lib/supabase';
-import { IncomingCallModal } from './components/IncomingCallModal';
-import { ActiveCall } from './components/ActiveCall';
-import { BriefingPopup } from './components/BriefingPopup';
-import { useIncomingCalls, unlockAudio } from './hooks/useIncomingCalls';
-import { useTelnyxWebRTC } from './hooks/useTelnyxWebRTC';
+import { useCall } from './context/CallContext';
 import { Sidebar } from './components/Sidebar';
-
-interface LineData {
-  id: number;
-  name: string;
-  label: string;
-  isOnline: boolean;
-}
 
 interface ActivityData {
   initials: string;
@@ -22,14 +10,6 @@ interface ActivityData {
   duration: string;
   status: 'approved' | 'denied';
 }
-
-const initialLines: LineData[] = [
-  { id: 1, name: 'Line 1', label: 'Primary', isOnline: true },
-  { id: 2, name: 'Line 2', label: 'Backup', isOnline: true },
-  { id: 3, name: 'Line 3', label: 'Partner', isOnline: true },
-  { id: 4, name: 'Line 4', label: 'Overflow', isOnline: true },
-  { id: 5, name: 'Line 5', label: 'Reserve', isOnline: true },
-];
 
 const activityData: ActivityData[] = [
   { initials: 'JS', name: 'John Smith', time: '2 minutes ago', duration: '5:23', status: 'approved' },
@@ -40,140 +20,17 @@ const activityData: ActivityData[] = [
 
 export function Dashboard() {
   const { closer } = useAuth();
+  const {
+    isOnline,
+    isUpdating,
+    handleMasterToggle,
+    webrtcConnected,
+    webrtcConnecting,
+    webrtcError,
+  } = useCall();
+
   const [currentTime, setCurrentTime] = useState('');
-  const [isOnline, setIsOnline] = useState(closer?.is_available ?? false);
-  const [lines, setLines] = useState<LineData[]>(initialLines);
-  const [isUpdating, setIsUpdating] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-
-  // Unlock audio on EVERY click on the page (browser requires user interaction)
-  // Keep listening because audio context can get suspended again
-  useEffect(() => {
-    const handleClick = () => {
-      unlockAudio();
-    };
-    document.addEventListener('click', handleClick);
-    document.addEventListener('touchstart', handleClick);
-    // Also unlock immediately if already mounted
-    unlockAudio();
-    return () => {
-      document.removeEventListener('click', handleClick);
-      document.removeEventListener('touchstart', handleClick);
-    };
-  }, []);
-
-  // WebRTC for Telnyx voice calls
-  const {
-    isConnected: webrtcConnected,
-    isConnecting: webrtcConnecting,
-    callState,
-    connect: connectWebRTC,
-    disconnect: disconnectWebRTC,
-    answer: answerWebRTC,
-    hangup,
-    toggleMute,
-    toggleHold,
-    error: webrtcError,
-  } = useTelnyxWebRTC();
-
-  // Track if we're expecting a WebRTC call (after claiming)
-  const [expectingWebRTCCall, setExpectingWebRTCCall] = useState(false);
-
-  // Callback when a call is successfully claimed - set flag to auto-answer WebRTC
-  const handleCallClaimed = useCallback(() => {
-    console.log('🎯 [Dashboard] handleCallClaimed TRIGGERED - setting expectingWebRTCCall=true');
-    console.log('🎯 [Dashboard] Current callState:', JSON.stringify(callState));
-    setExpectingWebRTCCall(true);
-  }, [callState]);
-
-  // Auto-answer Telnyx WebRTC call when it arrives after claiming
-  // Handle both normal calls (ringing) and SIP transfers (answering/active)
-  useEffect(() => {
-    console.log('🔄 [Dashboard] Auto-answer useEffect - isRinging:', callState.isRinging,
-      'isAnswering:', callState.isAnswering, 'isActive:', callState.isActive,
-      'direction:', callState.direction, 'expectingWebRTCCall:', expectingWebRTCCall);
-
-    // Normal incoming call - needs to be answered
-    if (callState.isRinging && callState.direction === 'inbound' && expectingWebRTCCall) {
-      console.log('✅ [Dashboard] RINGING - auto-answering!');
-      answerWebRTC();
-      setExpectingWebRTCCall(false);
-    }
-
-    // SIP transfer - call is already being answered, just clear the flag
-    if ((callState.isAnswering || callState.isActive) && callState.direction === 'inbound' && expectingWebRTCCall) {
-      console.log('✅ [Dashboard] SIP TRANSFER - call already connected, clearing flag');
-      setExpectingWebRTCCall(false);
-    }
-  }, [callState.isRinging, callState.isAnswering, callState.isActive, callState.direction, expectingWebRTCCall, answerWebRTC]);
-
-  // Incoming call handling with callback
-  const {
-    incomingCall,
-    activeCallData,
-    acceptCall,
-    declineCall,
-    claimError,
-    clearActiveCall,
-    isClaimingCall,
-  } = useIncomingCalls({ onCallClaimed: handleCallClaimed });
-
-  // Show claim error as alert (temporary - could be improved with toast)
-  useEffect(() => {
-    if (claimError) {
-      alert(claimError);
-    }
-  }, [claimError]);
-
-  // Show WebRTC error as alert
-  useEffect(() => {
-    if (webrtcError) {
-      console.error('WebRTC Error:', webrtcError);
-    }
-  }, [webrtcError]);
-
-  // Connect/disconnect WebRTC based on online status
-  // CRITICAL: Do NOT reconnect during an active call - creating a new client kills the call
-  useEffect(() => {
-    const sipUsername = closer?.sip_username;
-    const sipPassword = closer?.sip_password;
-
-    if (isOnline && sipUsername && sipPassword && !webrtcConnected && !webrtcConnecting) {
-      // If there's an active call, DON'T reconnect - it would destroy the call
-      // The audio stream is peer-to-peer and works without the signaling socket
-      if (callState.isActive || callState.isConnecting) {
-        console.log('⚠️ Socket disconnected but call is active - NOT reconnecting (would kill call)');
-        return;
-      }
-
-      // No active call - safe to reconnect with a small delay
-      const timeout = setTimeout(() => {
-        console.log('🔄 Reconnecting Telnyx WebRTC with username:', sipUsername);
-        connectWebRTC({ login: sipUsername, password: sipPassword });
-      }, 2000);
-      return () => clearTimeout(timeout);
-    } else if (!isOnline && webrtcConnected) {
-      console.log('Going offline, disconnecting WebRTC');
-      disconnectWebRTC();
-    }
-  }, [isOnline, closer?.sip_username, closer?.sip_password, webrtcConnected, webrtcConnecting, callState.isActive, callState.isConnecting, connectWebRTC, disconnectWebRTC]);
-
-  // Clear active call data when WebRTC call ends + restore online status
-  useEffect(() => {
-    if (!callState.isActive && activeCallData) {
-      // Call ended, clear active call data after a short delay
-      const timeout = setTimeout(() => {
-        clearActiveCall();
-        // Restore online status: n8n set is_available=false when call was accepted,
-        // so we need to flip it back now that the call is done.
-        // The closer was online before the call, they should stay online after.
-        setIsOnline(true);
-        updateAvailability(true);
-        console.log('📞 Call ended - restoring online status');
-      }, 500);
-      return () => clearTimeout(timeout);
-    }
-  }, [callState.isActive, activeCallData, clearActiveCall]);
 
   // Update current time
   useEffect(() => {
@@ -192,106 +49,14 @@ export function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Sync with closer's availability from database
-  // CRITICAL: Skip during active calls! When Cole accepts a call, n8n sets
-  // is_available=false in DB. If Supabase token refreshes (e.g. on tab switch-back),
-  // fetchProfile() re-fetches closer with is_available=false, which would set
-  // isOnline=false and trigger disconnectWebRTC(), killing the active call.
-  useEffect(() => {
-    if (closer && !callState.isActive && !callState.isConnecting) {
-      setIsOnline(closer.is_available);
-    }
-  }, [closer, callState.isActive, callState.isConnecting]);
-
-  // Master toggle handler
-  const handleMasterToggle = async () => {
-    if (isUpdating) return;
-
-    // Unlock audio on user interaction (required by browsers)
-    unlockAudio();
-
-    const newState = !isOnline;
-    setIsUpdating(true);
-
-    // Optimistically update UI
-    setIsOnline(newState);
-    setLines(lines.map((line) => ({ ...line, isOnline: newState })));
-
-    // Update backend
-    const result = await updateAvailability(newState);
-
-    if (!result.success) {
-      // Revert on failure
-      setIsOnline(!newState);
-      setLines(lines.map((line) => ({ ...line, isOnline: !newState })));
-      console.error('Failed to update availability:', result.error);
-    }
-
-    setIsUpdating(false);
-  };
-
-  /* Individual line toggle handler (hidden for now)
-  const handleLineToggle = (lineId: number) => {
-    const newLines = lines.map((line) =>
-      line.id === lineId ? { ...line, isOnline: !line.isOnline } : line
-    );
-    setLines(newLines);
-
-    // Check master state
-    const allOnline = newLines.every((l) => l.isOnline);
-    const allOffline = newLines.every((l) => !l.isOnline);
-
-    if (allOnline) {
-      setIsOnline(true);
-    } else if (allOffline) {
-      setIsOnline(false);
-    }
-  };
-
-  const activeLineCount = lines.filter((l) => l.isOnline).length;
-  */
-
   return (
     <>
-      {/* CRITICAL: Audio element for Telnyx remote audio (incoming call audio from lead) */}
-      {/* This element receives the remote audio stream from the WebRTC call */}
-      <audio id="telnyx-remote-audio" autoPlay playsInline />
-
       {/* Background Blobs */}
       <div className="bg-blobs">
         <div className="blob blob-1"></div>
         <div className="blob blob-2"></div>
         <div className="blob blob-3"></div>
       </div>
-
-      {/* Incoming Call Modal */}
-      <IncomingCallModal
-        callData={incomingCall}
-        onAccept={acceptCall}
-        onDecline={declineCall}
-        autoDeclineSeconds={30}
-        isClaimingCall={isClaimingCall}
-      />
-
-      {/* Active Call Panel (shown when on a call) */}
-      {(callState.isActive || callState.isConnecting) && (
-        <ActiveCall
-          callState={callState}
-          displayText={activeCallData?.display_text || 'Unknown Caller'}
-          onHangup={hangup}
-          onToggleMute={toggleMute}
-          onToggleHold={toggleHold}
-        />
-      )}
-
-      {/* Briefing Popup (shown during active call when briefing data exists) */}
-      <BriefingPopup
-        isVisible={!!(callState.isActive && activeCallData?.closer_briefing)}
-        closerBriefing={activeCallData?.closer_briefing}
-        beneficiaryName={activeCallData?.beneficiary_name}
-        coverageType={activeCallData?.coverage_type}
-        customerAge={activeCallData?.customer_age}
-      />
 
       {/* App Layout with Sidebar */}
       <div className={`app-layout ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
@@ -352,34 +117,7 @@ export function Dashboard() {
                         : 'CONNECTING...')
                 : 'OFFLINE'}
             </div>
-            {/* Lines counter hidden for now */}
           </section>
-
-          {/* Phone Lines Grid - Hidden for now, will be re-enabled later
-          <section className="lines-grid">
-            {lines.map((line) => (
-              <div
-                key={line.id}
-                className={`line-card ${line.isOnline ? 'online' : 'offline'}`}
-                data-line={line.id}
-              >
-                <div className="line-header">
-                  <div className="line-status-dot"></div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={line.isOnline}
-                      onChange={() => handleLineToggle(line.id)}
-                    />
-                    <span className="toggle-slider"></span>
-                  </label>
-                </div>
-                <div className="line-name">{line.name}</div>
-                <div className="line-label">{line.label}</div>
-              </div>
-            ))}
-          </section>
-          */}
 
           {/* Stats Cards */}
           <section className="stats-grid">
