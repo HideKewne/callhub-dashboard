@@ -3,6 +3,28 @@ import { useAuth } from './context/AuthContext';
 import { useCall } from './context/CallContext';
 import { Sidebar } from './components/Sidebar';
 
+// IDs with Lines grid access
+const LINES_VISIBLE_IDS = [
+  'f796a174-082e-4b84-9ca8-336f48fdc863',
+  '37a50717-52e3-4441-bb24-a79b5024e201',
+  '3f883155-97b5-4a88-b151-547f0d08783f',
+];
+
+interface LineData {
+  id: number;
+  name: string;
+  label: string;
+  isOnline: boolean;
+}
+
+const initialLines: LineData[] = [
+  { id: 1, name: 'Line 1', label: 'Whiterock Raw', isOnline: true },
+  { id: 2, name: 'Line 2', label: 'Whiterock CTV', isOnline: true },
+  { id: 3, name: 'Line 3', label: "Dean's Leads", isOnline: true },
+  { id: 4, name: 'Line 4', label: "Tom's Leads", isOnline: true },
+  { id: 5, name: 'Line 5', label: 'Reserve', isOnline: true },
+];
+
 interface ActivityData {
   initials: string;
   name: string;
@@ -31,6 +53,20 @@ export function Dashboard() {
 
   const [currentTime, setCurrentTime] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [lines, setLines] = useState<LineData[]>(initialLines);
+
+  const showLines = closer?.id ? LINES_VISIBLE_IDS.includes(closer.id) : false;
+
+  // Sync line toggles with master online status
+  useEffect(() => {
+    setLines(prev => prev.map(line => ({ ...line, isOnline })));
+  }, [isOnline]);
+
+  const handleLineToggle = (lineId: number) => {
+    setLines(prev => prev.map(line =>
+      line.id === lineId ? { ...line, isOnline: !line.isOnline } : line
+    ));
+  };
 
   // Update current time
   useEffect(() => {
@@ -118,6 +154,33 @@ export function Dashboard() {
                 : 'OFFLINE'}
             </div>
           </section>
+
+          {/* Phone Lines Grid - only visible to Cole & Joe */}
+          {showLines && (
+            <section className="lines-grid">
+              {lines.map((line) => (
+                <div
+                  key={line.id}
+                  className={`line-card ${line.isOnline ? 'online' : 'offline'}`}
+                  data-line={line.id}
+                >
+                  <div className="line-header">
+                    <div className="line-status-dot"></div>
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={line.isOnline}
+                        onChange={() => handleLineToggle(line.id)}
+                      />
+                      <span className="toggle-slider"></span>
+                    </label>
+                  </div>
+                  <div className="line-name">{line.name}</div>
+                  <div className="line-label">{line.label}</div>
+                </div>
+              ))}
+            </section>
+          )}
 
           {/* Stats Cards */}
           <section className="stats-grid">
