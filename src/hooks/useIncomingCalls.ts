@@ -24,7 +24,7 @@ interface IncomingCallData {
   lead_city: string;
   eligible_closer_ids: string[];
   timestamp: string;
-  // Briefing data for closer popup (Cole script)
+  // Briefing data for closer popup
   closer_briefing?: string | null;
   beneficiary_name?: string | null;
   coverage_type?: string | null;

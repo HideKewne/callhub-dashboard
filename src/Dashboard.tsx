@@ -155,7 +155,7 @@ export function Dashboard() {
             </div>
           </section>
 
-          {/* Phone Lines Grid - only visible to Cole & Joe */}
+          {/* Phone Lines Grid - admin users only */}
           {showLines && (
             <section className="lines-grid">
               {lines.map((line) => (
